@@ -1,4 +1,5 @@
 require('dotenv').config();
+
 const {
     Client,
     GatewayIntentBits,
@@ -15,12 +16,10 @@ const {
 
 const discordTranscripts = require('discord-html-transcripts');
 
-// 🔐 ENV
-const TOKEN = process.env.TOKEN;
-const SUPPORT_ROLE_ID = process.env.SUPPORT_ROLE_ID;
-const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
-const CATEGORY_ID = process.env.CATEGORY_ID;
 
+// =====================
+// 🤖 CLIENT (RICHTIG INITIALISIERT)
+// =====================
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -30,53 +29,51 @@ const client = new Client({
     partials: [Partials.Channel]
 });
 
+
+// =====================
+// 🔐 TOKEN CHECK
+// =====================
+if (!process.env.TOKEN) {
+    console.log("❌ TOKEN fehlt!");
+    process.exit(1);
+}
+
+
+// =====================
+// 🚀 READY
+// =====================
 client.once('ready', () => {
     console.log(`✅ Eingeloggt als ${client.user.tag}`);
 });
 
 
 // =====================
-// 🎛 MRK TICKET PANEL
+// 🎫 PANEL COMMAND
 // =====================
 client.on('messageCreate', async (message) => {
+
+    if (message.author.bot) return;
+
     if (message.content === '!setup') {
 
         const embed = new EmbedBuilder()
             .setColor(0x5865F2)
             .setTitle('🎫 MRK Ticket System')
             .setDescription(
-                "```yaml\nWillkommen im MRK Support System\n```\n\n" +
-
-                "📌 Wähle eine Kategorie:\n" +
-                "🛠️ Support → Hilfe erhalten\n" +
-                "🚨 Report → Spieler melden\n" +
-                "📄 Bewerbung → Team Bewerbung\n\n" +
-
-                "⏱ Antwortzeit: ~ 5–30 Min\n\n" +
-
-                "⚠️ Bitte keine Spam Tickets erstellen!"
+                "Wähle eine Kategorie:\n\n" +
+                "🛠️ Support\n🚨 Report\n📄 Bewerbung\n\n" +
+                "⏱ Antwortzeit: wenige Minuten"
             )
             .setImage('https://cdn.discordapp.com/attachments/1475014971632124018/1496550680935141638/file_000000002a28724685e3c3850ebf6e16.png?ex=69eb9c6e&is=69ea4aee&hm=783e3137be45f238334e3602bec830681f9c6f96fdee1b47c5cfab56dd10e0b4&')
-            .setThumbnail('https://cdn.discordapp.com/embed/avatars/0.png')
-            .setFooter({ text: 'MRK Ticket System' })
-            .setTimestamp();
+            .setFooter({ text: 'MRK Ticket System' });
 
         const menu = new StringSelectMenuBuilder()
             .setCustomId('ticket_select')
             .setPlaceholder('🎫 Kategorie auswählen')
             .addOptions([
-                {
-                    label: '🛠️ Support',
-                    value: 'support'
-                },
-                {
-                    label: '🚨 Report',
-                    value: 'report'
-                },
-                {
-                    label: '📄 Bewerbung',
-                    value: 'bewerbung'
-                }
+                { label: 'Support', value: 'support' },
+                { label: 'Report', value: 'report' },
+                { label: 'Bewerbung', value: 'bewerbung' }
             ]);
 
         const row = new ActionRowBuilder().addComponents(menu);
@@ -90,34 +87,47 @@ client.on('messageCreate', async (message) => {
 
 
 // =====================
-// 🎛 INTERACTIONS
+// 🎫 INTERACTIONS (FIXED)
 // =====================
 client.on(Events.InteractionCreate, async interaction => {
 
     // =====================
-    // 🎫 DROPDOWN
+    // DROPDOWN
     // =====================
     if (interaction.isStringSelectMenu()) {
 
-        if (interaction.customId === 'ticket_select') {
+        if (interaction.customId !== 'ticket_select') return;
 
-            const existing = interaction.guild.channels.cache.find(c =>
-                c.topic === `owner:${interaction.user.id}`
-            );
+        await interaction.deferReply({ ephemeral: true });
 
-            if (existing) {
-                return interaction.reply({
-                    content: `❌ Du hast bereits ein Ticket: ${existing}`,
-                    ephemeral: true
-                });
-            }
+        const type = interaction.values[0];
 
-            const type = interaction.values[0];
+        let categoryId = null;
 
+        if (type === 'support') {
+            categoryId = process.env.CATEGORY_SUPPORT_ID;
+        }
+
+        if (type === 'report') {
+            categoryId = process.env.CATEGORY_REPORT_ID;
+        }
+
+        if (type === 'bewerbung') {
+            categoryId = process.env.CATEGORY_BEWERBUNG_ID;
+        }
+
+        console.log("TYPE:", type);
+        console.log("CATEGORY ID:", categoryId);
+
+        if (!categoryId) {
+            return interaction.editReply("❌ Kategorie ID fehlt (Railway prüfen)");
+        }
+
+        try {
             const channel = await interaction.guild.channels.create({
                 name: `${type}-${interaction.user.username}`,
                 type: ChannelType.GuildText,
-                parent: CATEGORY_ID,
+                parent: categoryId,
                 topic: `owner:${interaction.user.id}`,
                 permissionOverwrites: [
                     {
@@ -128,14 +138,16 @@ client.on(Events.InteractionCreate, async interaction => {
                         id: interaction.user.id,
                         allow: [
                             PermissionsBitField.Flags.ViewChannel,
-                            PermissionsBitField.Flags.SendMessages
+                            PermissionsBitField.Flags.SendMessages,
+                            PermissionsBitField.Flags.ReadMessageHistory
                         ]
                     },
                     {
-                        id: SUPPORT_ROLE_ID,
+                        id: process.env.SUPPORT_ROLE_ID,
                         allow: [
                             PermissionsBitField.Flags.ViewChannel,
-                            PermissionsBitField.Flags.SendMessages
+                            PermissionsBitField.Flags.SendMessages,
+                            PermissionsBitField.Flags.ReadMessageHistory
                         ]
                     }
                 ]
@@ -143,52 +155,34 @@ client.on(Events.InteractionCreate, async interaction => {
 
             const closeBtn = new ButtonBuilder()
                 .setCustomId('close_ticket')
-                .setLabel('🔒 Schließen')
+                .setLabel('🔒 Ticket schließen')
                 .setStyle(ButtonStyle.Danger);
 
             const row = new ActionRowBuilder().addComponents(closeBtn);
 
-            // 💎 NICE WELCOME EMBED
             await channel.send({
                 embeds: [
                     new EmbedBuilder()
                         .setColor(0x5865F2)
                         .setTitle('🎫 Ticket erstellt')
-                        .setDescription(
-                            `👋 Hallo ${interaction.user}, dein **Ticket wurde erfolgreich erstellt!**\n\n` +
-                            `📌 **Kategorie:** \`${type}\`\n` +
-                            `🕒 Bitte beschreibe dein Anliegen so genau wie möglich\n\n` +
-                            `🔔 Unser Support-Team meldet sich in Kürze bei dir!`
-                        )
-                        .setThumbnail(interaction.user.displayAvatarURL())
-                        .addFields(
-                            {
-                                name: '📁 Status',
-                                value: '🟢 Offen',
-                                inline: true
-                            },
-                            {
-                                name: '👤 Erstellt von',
-                                value: `${interaction.user.tag}`,
-                                inline: true
-                            }
-                        )
+                        .setDescription(`👋 Hallo ${interaction.user}\nBeschreibe dein Anliegen.`)
+                        .setImage('https://cdn.discordapp.com/attachments/1475014971632124018/1496550680935141638/file_000000002a28724685e3c3850ebf6e16.png?ex=69eb9c6e&is=69ea4aee&hm=783e3137be45f238334e3602bec830681f9c6f96fdee1b47c5cfab56dd10e0b4&')
                         .setFooter({ text: 'MRK Ticket System' })
-                        .setTimestamp()
                 ],
                 components: [row]
             });
 
-            await interaction.reply({
-                content: `✅ Ticket erstellt: ${channel}`,
-                ephemeral: true
-            });
+            return interaction.editReply(`✅ Ticket erstellt: ${channel}`);
+
+        } catch (err) {
+            console.log("❌ ERROR:", err);
+            return interaction.editReply("❌ Fehler beim Erstellen des Tickets");
         }
     }
 
 
     // =====================
-    // 🔘 BUTTON SYSTEM
+    // CLOSE BUTTON
     // =====================
     if (interaction.isButton()) {
 
@@ -196,69 +190,52 @@ client.on(Events.InteractionCreate, async interaction => {
 
             const ownerId = interaction.channel.topic?.replace('owner:', '');
             const isOwner = interaction.user.id === ownerId;
-            const isSupport = interaction.member.roles.cache.has(SUPPORT_ROLE_ID);
+            const isSupport = interaction.member.roles.cache.has(process.env.SUPPORT_ROLE_ID);
 
             if (!isOwner && !isSupport) {
                 return interaction.reply({
-                    content: '❌ Keine Berechtigung.',
+                    content: '❌ Keine Rechte',
                     ephemeral: true
                 });
             }
 
-            const confirm = new ButtonBuilder()
-                .setCustomId('confirm_close')
-                .setLabel('✅ Schließen')
-                .setStyle(ButtonStyle.Danger);
-
-            const cancel = new ButtonBuilder()
-                .setCustomId('cancel_close')
-                .setLabel('❌ Abbrechen')
-                .setStyle(ButtonStyle.Secondary);
-
-            const row = new ActionRowBuilder().addComponents(confirm, cancel);
-
             await interaction.reply({
-                content: 'Bist du sicher?',
-                components: [row],
-                ephemeral: true
-            });
-        }
-
-
-        if (interaction.customId === 'confirm_close') {
-
-            await interaction.reply({
-                content: '📝 Erstelle Transcript...',
+                content: '📝 Transcript wird erstellt...',
                 ephemeral: true
             });
 
-            const logChannel = interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
+            const logChannel = interaction.guild.channels.cache.get(process.env.LOG_CHANNEL_ID);
 
-            const attachment = await discordTranscripts.createTranscript(interaction.channel, {
-                limit: -1,
-                fileName: `ticket-${interaction.channel.name}.html`
-            });
+            const file = await discordTranscripts.createTranscript(interaction.channel);
 
-            await logChannel.send({
-                content: `📁 Transcript von ${interaction.channel.name}`,
-                files: [attachment]
-            });
-
-            await interaction.channel.send('🔒 Ticket wird gelöscht...');
+            if (logChannel) {
+                await logChannel.send({
+                    content: `📁 Ticket geschlossen: ${interaction.channel.name}`,
+                    files: [file]
+                });
+            }
 
             setTimeout(() => {
-                interaction.channel.delete().catch(() => {});
+                interaction.channel.delete();
             }, 3000);
-        }
-
-
-        if (interaction.customId === 'cancel_close') {
-            await interaction.reply({
-                content: 'Abgebrochen.',
-                ephemeral: true
-            });
         }
     }
 });
 
-client.login(TOKEN);
+
+// =====================
+// 💥 ERROR HANDLING
+// =====================
+process.on("unhandledRejection", err => {
+    console.log("❌ Error:", err);
+});
+
+process.on("uncaughtException", err => {
+    console.log("❌ Crash:", err);
+});
+
+
+// =====================
+// 🔑 LOGIN
+// =====================
+client.login(process.env.TOKEN);
