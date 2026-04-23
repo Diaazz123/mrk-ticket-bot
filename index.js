@@ -18,7 +18,7 @@ const discordTranscripts = require('discord-html-transcripts');
 
 
 // =====================
-// 🤖 CLIENT
+// 🤖 CLIENT (RICHTIG INITIALISIERT)
 // =====================
 const client = new Client({
     intents: [
@@ -31,6 +31,15 @@ const client = new Client({
 
 
 // =====================
+// 🔐 TOKEN CHECK
+// =====================
+if (!process.env.TOKEN) {
+    console.log("❌ TOKEN fehlt!");
+    process.exit(1);
+}
+
+
+// =====================
 // 🚀 READY
 // =====================
 client.once('ready', () => {
@@ -39,7 +48,7 @@ client.once('ready', () => {
 
 
 // =====================
-// 🎫 PANEL
+// 🎫 PANEL COMMAND
 // =====================
 client.on('messageCreate', async (message) => {
 
@@ -55,7 +64,7 @@ client.on('messageCreate', async (message) => {
                 "🛠️ Support\n🚨 Report\n📄 Bewerbung\n\n" +
                 "⏱ Antwortzeit: wenige Minuten"
             )
-            .setImage('https://i.imgur.com/9Y2g3Qb.png')
+            .setImage('https://cdn.discordapp.com/attachments/1475014971632124018/1496550680935141638/file_000000002a28724685e3c3850ebf6e16.png?ex=69eb9c6e&is=69ea4aee&hm=783e3137be45f238334e3602bec830681f9c6f96fdee1b47c5cfab56dd10e0b4&')
             .setFooter({ text: 'MRK Ticket System' });
 
         const menu = new StringSelectMenuBuilder()
@@ -78,12 +87,12 @@ client.on('messageCreate', async (message) => {
 
 
 // =====================
-// 🎫 INTERACTIONS (DEBUG VERSION)
+// 🎫 INTERACTIONS (FIXED)
 // =====================
 client.on(Events.InteractionCreate, async interaction => {
 
     // =====================
-    // DROPDOWN DEBUG
+    // DROPDOWN
     // =====================
     if (interaction.isStringSelectMenu()) {
 
@@ -93,25 +102,28 @@ client.on(Events.InteractionCreate, async interaction => {
 
         const type = interaction.values[0];
 
-        console.log("👉 TICKET TYPE:", type);
-
         let categoryId = null;
 
-        if (type === 'support') categoryId = process.env.CATEGORY_SUPPORT_ID;
-        if (type === 'report') categoryId = process.env.CATEGORY_REPORT_ID;
-        if (type === 'bewerbung') categoryId = process.env.CATEGORY_BEWERBUNG_ID;
+        if (type === 'support') {
+            categoryId = process.env.CATEGORY_SUPPORT_ID;
+        }
 
-        console.log("👉 CATEGORY ID:", categoryId);
+        if (type === 'report') {
+            categoryId = process.env.CATEGORY_REPORT_ID;
+        }
 
-        // 🔴 WICHTIG: HIER sehen wir sofort ob Problem existiert
+        if (type === 'bewerbung') {
+            categoryId = process.env.CATEGORY_BEWERBUNG_ID;
+        }
+
+        console.log("TYPE:", type);
+        console.log("CATEGORY ID:", categoryId);
+
         if (!categoryId) {
-            return interaction.editReply("❌ CATEGORY ID fehlt (Railway Variables prüfen)");
+            return interaction.editReply("❌ Kategorie ID fehlt (Railway prüfen)");
         }
 
         try {
-
-            console.log("👉 VERSUCHE CHANNEL ZU ERSTELLEN...");
-
             const channel = await interaction.guild.channels.create({
                 name: `${type}-${interaction.user.username}`,
                 type: ChannelType.GuildText,
@@ -141,26 +153,89 @@ client.on(Events.InteractionCreate, async interaction => {
                 ]
             });
 
-            console.log("✅ CHANNEL ERSTELLT:", channel.id);
+            const closeBtn = new ButtonBuilder()
+                .setCustomId('close_ticket')
+                .setLabel('🔒 Ticket schließen')
+                .setStyle(ButtonStyle.Danger);
+
+            const row = new ActionRowBuilder().addComponents(closeBtn);
+
+            await channel.send({
+                embeds: [
+                    new EmbedBuilder()
+                        .setColor(0x5865F2)
+                        .setTitle('🎫 Ticket erstellt')
+                        .setDescription(`👋 Hallo ${interaction.user}\nBeschreibe dein Anliegen.`)
+                        .setImage('https://cdn.discordapp.com/attachments/1475014971632124018/1496550680935141638/file_000000002a28724685e3c3850ebf6e16.png?ex=69eb9c6e&is=69ea4aee&hm=783e3137be45f238334e3602bec830681f9c6f96fdee1b47c5cfab56dd10e0b4&')
+                        .setFooter({ text: 'MRK Ticket System' })
+                ],
+                components: [row]
+            });
 
             return interaction.editReply(`✅ Ticket erstellt: ${channel}`);
 
         } catch (err) {
+            console.log("❌ ERROR:", err);
+            return interaction.editReply("❌ Fehler beim Erstellen des Tickets");
+        }
+    }
 
-            // 🔥 DAS IST DER WICHTIGSTE TEIL
-            console.log("❌ FULL ERROR START");
-            console.log(err);
-            console.log("👉 CATEGORY:", categoryId);
-            console.log("👉 TYPE:", type);
-            console.log("❌ FULL ERROR END");
 
-            return interaction.editReply("❌ Fehler beim Erstellen (siehe Konsole)");
+    // =====================
+    // CLOSE BUTTON
+    // =====================
+    if (interaction.isButton()) {
+
+        if (interaction.customId === 'close_ticket') {
+
+            const ownerId = interaction.channel.topic?.replace('owner:', '');
+            const isOwner = interaction.user.id === ownerId;
+            const isSupport = interaction.member.roles.cache.has(process.env.SUPPORT_ROLE_ID);
+
+            if (!isOwner && !isSupport) {
+                return interaction.reply({
+                    content: '❌ Keine Rechte',
+                    ephemeral: true
+                });
+            }
+
+            await interaction.reply({
+                content: '📝 Transcript wird erstellt...',
+                ephemeral: true
+            });
+
+            const logChannel = interaction.guild.channels.cache.get(process.env.LOG_CHANNEL_ID);
+
+            const file = await discordTranscripts.createTranscript(interaction.channel);
+
+            if (logChannel) {
+                await logChannel.send({
+                    content: `📁 Ticket geschlossen: ${interaction.channel.name}`,
+                    files: [file]
+                });
+            }
+
+            setTimeout(() => {
+                interaction.channel.delete();
+            }, 3000);
         }
     }
 });
 
 
 // =====================
-// LOGIN
+// 💥 ERROR HANDLING
+// =====================
+process.on("unhandledRejection", err => {
+    console.log("❌ Error:", err);
+});
+
+process.on("uncaughtException", err => {
+    console.log("❌ Crash:", err);
+});
+
+
+// =====================
+// 🔑 LOGIN
 // =====================
 client.login(process.env.TOKEN);
